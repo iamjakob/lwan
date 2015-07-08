@@ -19,4 +19,3 @@ void *retrieve_block(struct page_cache *from);
 void return_block(struct page_cache *to, void *blk);
 
 struct page_cache *get_cache_for_thread();
-
