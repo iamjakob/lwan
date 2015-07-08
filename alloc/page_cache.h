@@ -9,16 +9,14 @@
 //can share with each toher to an extent. But premature optimization
 //is bad guys.
 
-typedef struct {
-    union mem_page *blocks;
-    size_t num_blocks;
-    size_t canary;
-} page_cache;
 
-void init_page_cache(page_cache *toinit);
+struct page_cache;
 
-void clear_page_cache(page_cache *toclear);
+void clear_page_cache(struct page_cache *toclear);
 
-void *retrieve_block(page_cache *from);
+void *retrieve_block(struct page_cache *from);
 
-void return_block(page_cache *to, void *blk);
+void return_block(struct page_cache *to, void *blk);
+
+struct page_cache *get_cache_for_thread();
+
