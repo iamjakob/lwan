@@ -113,6 +113,8 @@ static size_t sizelst[] = {
     PAGE
 };
 
+//since threads are only used at program open/shutdown,
+//We don't need to ad any blocks into the mix
 block_cache *get_thread_local_cache(block_sizes which) {
     size_t ind = get_ind(which);
     block_cache *getem = blocks;

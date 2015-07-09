@@ -12,7 +12,7 @@ typedef enum {
 } block_sizes;
 
 typedef struct block {
-    struct block *next;
+    struct block *next; //also usable when outside of the alloc...
     struct block *act_next_; //used when clearing threadlocal
     struct block *act_prev_; //used when clearing threadlocal
     void *data;

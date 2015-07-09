@@ -28,6 +28,7 @@
 #include <unistd.h>
 
 #include "lwan-private.h"
+#include "../alloc/block_cache.h"
 
 struct death_queue_t {
     lwan_connection_t *conns;
