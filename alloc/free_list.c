@@ -1,151 +1,67 @@
 #include "free_list.h"
-#define EMPTY_KEEP 2
+#include <assert.h>
 
-#define GET_BLOB_DATA(x) (x)
-#define SET_NEXT_BLOB(x, newb) *((void **)x) = newb;
-#define GET_NEXT_BLOB(x) (*((void **)x))
-#define SET_BLOCK(x, data_size, inb)  *(void **)((char *)(x) + data_size - sizeof(short)) = inb;
-#define GET_BLOCK(x, data_size) (*(void **)((char *)(x) + data_size - sizeof(void *)))
-#define GET_SLAB(blk) ((slab *)((char *)(blk) - slab_extra))
-#define FIRST(x) (((block *)((char *)(x) + slab_extra))->next)
+typedef union chunk {
+    union chunk *next;
+    char data[1]; //char c[] not allowed in union
+} chunk;
 
-#define slab_extra sizeof(struct {size_t pad_64; size_t s; void *v; void *q;})
-typedef struct slab {
-    size_t num_alloc;
-    struct slab *next, *prev;
-    size_t pad64;
-    block datablk;
-} slab;
-
-static void remove_slab (slab **fromp, slab *inslab) {
-    if (inslab->next == inslab) {
-        inslab->next = inslab->prev = NULL;
-        *fromp = NULL;
+static void *add_block(free_list *from) {
+    block *blk = get_block(from->cache);
+    uint16_t elems_per_block = data_space(from->which) / from->data_size;
+    chunk *curchunk = blk->data;
+    curchunk++;
+    for (size_t i = 1; i < elems_per_block; i++) {
+        chunk *next = (chunk *)((char *)curchunk + from->data_size);
+        curchunk->next = next;
+        curchunk = next;
     }
-    inslab->next->prev = inslab->prev;
-    inslab->prev->next = inslab->next;
-    *fromp = (inslab == *fromp) ? inslab->next : *fromp;
+    curchunk->next = NULL;
+    blk->next = from->blocks;
+    from->blocks = blk;
+    from->nblocks++;
+    return blk->data;
 }
 
-static void add_slab_tail(slab **listp, slab *newslab) {
-    slab *list = *listp;
-    if (!list) {
-        newslab->next = newslab->prev = newslab;
-        *listp = newslab;
-    }
-    else {
-        newslab->next = list;
-        newslab->prev = list->prev;
-        if (list->prev)
-            list->prev->next = newslab;
-        list->prev = newslab;
+void *free_list_alloc(free_list *from) {
+    chunk *first = from->first_open;
+    if (first)
+        return add_block(from);
+    void *rdata = first->data;
+    from->first_open = first->next;
+    return rdata;
+}
+
+void free_list_free(free_list *into, void* freeptr) {
+    if (freeptr) {
+        ((chunk *)freeptr)->next = into->first_open;
+        into->first_open = freeptr;
     }
 }
 
-static void add_slab_head(slab **listp, slab *newslab) {
-    slab *list = *listp;
-    if (!list) {
-        newslab->next = newslab->prev = newslab;
-        *listp = newslab;
+void clear_free_list(free_list *toclear) {
+    while (toclear->blocks) {
+        block *todel = toclear->blocks;
+        toclear->blocks = toclear->blocks->next;
+        return_block(toclear->cache, todel);
     }
-    else {
-        newslab->next = list->next;
-        newslab->prev = list;
-        if (list->next)
-            list->next->prev = newslab;
-        list->next = newslab;
-        *listp = newslab;
-    }
+    toclear->nblocks = 0;
+    toclear->first_open = NULL;
 }
 
-
-static void init_slab_list(void *slabdat, size_t num_elem, size_t elem_size, void *slab) {
-    void *cur_blob = slabdat;
-    for(size_t i = 0; i < num_elem - 1; i++) {
-        SET_NEXT_BLOB(cur_blob, ((char *)cur_blob + elem_size));
-        SET_BLOCK(cur_blob, elem_size, slab)
-        cur_blob = (char *)cur_blob + elem_size;
-    }
-    SET_NEXT_BLOB(cur_blob, NULL);
-    SET_BLOCK(cur_blob, elem_size, slab);
+static uint16_t get_data_size(uint16_t in) {
+    if (in < sizeof(chunk))
+        return sizeof (chunk);
+    if (!(in % sizeof(chunk)))
+        return in;
+    return in + sizeof(chunk) - (in % sizeof(chunk));
 }
 
-static void *add_slab_to(tracked_free_list *into) {
-    block *curblock = get_block(into->cache);
-    if (!curblock)
-        return NULL;
-
-    init_slab_list((char *)curblock->data + into->data_size,
-                   into->num_per_slab - 1,
-                   into->data_size,
-                   curblock);
-
-    SET_BLOCK(curblock->data, into->data_size, curblock);
-    add_slab_head(&into->partial, GET_SLAB(curblock));
-    return curblock->data;
-}
-
-static inline void *_alloc(tracked_free_list *from) {
-    void *first_open = FIRST(from->partial);
-    void *data = GET_BLOB_DATA(first_open);
-    void *next = GET_NEXT_BLOB(first_open);
-    FIRST(from->partial) = next;
-    if (!next) {
-        slab *fulls = from->partial;
-        remove_slab(&from->partial, from->partial);
-        add_slab_tail(&from->full, fulls);
-    }
-    return data;
-}
-
-//could do some slight optimizations in this and move full
-//namely eliminate a branch/2 and a few instrs and add/remove slab.
-//But I don't expect these fncs to be called often enough for it
-//to seriously make a difference
-
-static void *add_partial(tracked_free_list *into) {
-    if (into->empty) {
-        slab *emptys = into->empty;
-        remove_slab(&into->empty, into->empty);
-        add_slab_head(&into->partial, emptys);
-        return _alloc(into);
-    }
-    return add_slab_to(into);
-}
-
-void *tracked_alloc(tracked_free_list *from) {
-    if (!from->partial)
-        return add_partial(from);
-    return _alloc(from);
-}
-
-static void del_slab(block_cache *cache, slab *todel) {
-    return_block(cache, &todel->datablk);
-}
-
-static void proc_empty(tracked_free_list *from, slab *nempty) {
-    remove_slab(&from->partial, nempty);
-    if (from->num_empty > EMPTY_KEEP)
-        del_slab(from->cache, nempty);
-    else
-        add_slab_head(&from->empty, nempty);
-}
-
-void tracked_free(tracked_free_list *from, void *data) {
-    if (!data)
-        return;
-    block *curblock = GET_BLOCK(data, from->data_size);
-    char isfull = !curblock->next;
-    char isempty = 0;
-    SET_NEXT_BLOB(data, curblock->next);
-
-    slab *cslab = GET_SLAB(curblock);
-    if (isfull) {
-        remove_slab (&from->full, cslab);
-        add_slab_tail(&from->partial, cslab);
-        return;
-    }
-    else if (isempty) {
-        proc_empty(from, cslab);
-    }
+void init_free_list(free_list *toinit, uint16_t alloc_size, block_sizes which) {
+    toinit->which = which;
+    toinit->blocks = NULL;
+    toinit->first_open = NULL;
+    toinit->nblocks = 0;
+    toinit->data_size = get_data_size(alloc_size);
+    assert(2*toinit->data_size < data_space(which));
 }

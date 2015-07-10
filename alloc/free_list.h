@@ -1,13 +1,15 @@
 #pragma once
 #include "block_cache.h"
 #include <stdint.h>
+
 typedef struct { 
-    struct slab *partial, *full, *empty;
+    union chunk *first_open;
+    struct block *blocks;
     block_cache *cache;
-    block_sizes which;
-    uint16_t num_per_slab;
+    uint32_t nblocks;
+    uint16_t which;
     uint16_t data_size;
-    uint8_t num_empty;
+} free_list;
 
-} tracked_free_list;
 
+void free_list_free(free_list *into, void *freeptr);

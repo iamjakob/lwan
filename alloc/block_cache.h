@@ -1,7 +1,8 @@
 #pragma once
 
 #include <stddef.h>
-//each result actually gets size - 32, bytes
+#include <stdint.h>
+//each result actually gets size - sizeof(block), bytes
 //bookkeeping is kept in power of two sizes to make
 //alignment easier
 typedef enum {
@@ -38,3 +39,5 @@ block_cache *get_thread_local_cache(block_sizes which);
 void clear_threadlocals();
 
 void clear_all_threadlocals();
+
+#define data_space(which) ((which) - sizeof(block))
