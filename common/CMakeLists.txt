@@ -25,6 +25,9 @@ set(SOURCES
 	strbuf.c
 	murmur3.c
 	reallocarray.c
+    free_list.c
+    tracked_free_list.c
+    block_cache.c
 )
 
 
